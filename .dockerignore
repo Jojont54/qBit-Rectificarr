@@ -1,0 +1,10 @@
+.git
+.gitignore
+.dockerignore
+__pycache__/
+*.pyc
+test/
+docker-compose*.yml
+README.md
+posttorent.sh
+config.json
