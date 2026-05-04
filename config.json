@@ -1,7 +1,23 @@
 {
     "radarr" : {
+        "enabled" : true,
         "host" : "your_radarr_host",
         "port" : "your_radarr_port",
-        "api_key" : "your_radarr_api_key"
+        "api_key" : "your_radarr_api_key",
+        "ssl" : false
+    },
+    "sonarr" : {
+        "enabled" : false,
+        "host" : "your_sonarr_host",
+        "port" : "your_sonarr_port",
+        "api_key" : "your_sonarr_api_key",
+        "ssl" : false
+    },
+    "qbittorrent" : {
+        "host" : "your_qbittorrent_host",
+        "port" : "your_qbittorrent_port",
+        "username" : "your_qbittorrent_username",
+        "password" : "your_qbittorrent_password",
+        "ssl" : false
     }
 }

@@ -1,249 +1,497 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-#--------------------------------------------
 
-# Sometimes Torrent Trackers set shit names in movie files. 
-# This shit causes "Unable to parse file" error in Radarr Activity, then Radarr can't rewrite file to setted Path.
-# This script uses Radarr API to check if exist an activity with this error and force rename
-# This project contains posttorrent.sh Bash script integrated with Transmission Daemon to auto-unrar torrent downloads. 
-# posttorrent.sh Credits to Killemov. Instructions : https://forum.transmissionbt.com/viewtopic.php?t=10364
-#
-# Rectificarr
-# Created By  : fe80grau
-# Created Date: 2023/02
-# version ='1.0'
-# Radarr API : https://radarr.video/docs/api/
-# Radarr API Endpoint used in this script: https://radarr.video/docs/api/#/Queue/get_api_v3_queue
-# isBase64 function from: https://stackoverflow.com/questions/12315398/check-if-a-string-is-encoded-in-base64-using-python
-# -------------------------------------------
-
-import requests
-import urllib.parse
-import shutil
-import traceback
-import base64
 import json
+import logging
 import os
-import mimetypes
-import glob
-import subprocess
+import posixpath
+import re
+import time
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional, Tuple
 
-mimetypes.init()
+try:
+    import requests
+except ModuleNotFoundError:
+    requests = None
 
-#Reading config file
-with open('config.json', 'r') as f:
-    config = json.load(f)
 
-#Utils
-def makeUrl(host, port, endpoint, params=False):
-    baseurl = "http://{}:{}/".format(host, port)
-    return "{}{}?{}".format(baseurl, endpoint, params) if params else "{}{}".format(baseurl, endpoint)
+MEDIA_EXTENSIONS = {
+    ".3g2", ".3gp", ".asf", ".avi", ".divx", ".flv", ".m2ts", ".m4v",
+    ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".mts", ".ogm", ".ogv",
+    ".rm", ".rmvb", ".ts", ".vob", ".webm", ".wmv",
+}
 
-def rename(title, year, quality, file):
-    return "{} ({}) {}.{}".format(title, year, quality, file.split('.')[-1])
+ASSOCIATED_EXTENSIONS = {
+    ".ass", ".idx", ".nfo", ".srt", ".ssa", ".sub",
+}
 
-def isMediaFile(fileName):
-    mimestart = mimetypes.guess_type(fileName)[0]
+IMPORT_FIX_MESSAGES = (
+    "unable to parse file",
+    "unknown movie",
+    "not a custom format upgrade",
+)
 
-    if mimestart != None:
-        mimestart = mimestart.split('/')[0]
+EPISODE_RE = re.compile(
+    r"(?P<token>S(?P<season>\d{1,2})\s*E(?P<episode>\d{1,3})(?:\s*(?:-|E)\s*\d{1,3})*)",
+    re.IGNORECASE,
+)
+SEASON_RE = re.compile(r"S\d{1,2}(?!\s*E\d)", re.IGNORECASE)
+INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+SAMPLE_RE = re.compile(r"(^|[.\s_\-\[\(])sample([.\s_\-\]\)]|$)", re.IGNORECASE)
 
-        if mimestart in ['video']:
-            return True
-    
-    return False
-#Define Radarr setting and enpoint url constructor 
-#Queue
-params_radarr = urllib.parse.urlencode({
-    "includeUnknownMovieItems" : "true",
-    "includeMovie" : "true",
-    "apikey" : config['radarr']['api_key']
-})
-#Make url merging chunks with makeUrl util
-queue_url_radarr = makeUrl(config['radarr']['host'], 
-                            config['radarr']['port'],
-                            'api/v3/queue',
-                            params_radarr)
+LOGGER = logging.getLogger("qbit_rectificarr")
 
-#Get list of all movies /api/v3/movie amd merging history
-movies_history = []
-params_radarr = urllib.parse.urlencode({
-    "apikey" : config['radarr']['api_key']
-})
 
-movies_url_radarr = makeUrl(config['radarr']['host'], 
-                            config['radarr']['port'],
-                            'api/v3/movie',
-                            params_radarr)
+@dataclass
+class AppConfig:
+    name: str
+    media_type: str
+    host: str
+    port: str
+    api_key: str
+    ssl: bool = False
+    enabled: bool = True
 
-movies = requests.get(movies_url_radarr).json()
-for movie in movies:
-    params_radarr = urllib.parse.urlencode({
-        "movieid" : movie['id'],
-        "apikey" : config['radarr']['api_key']
-    })
 
-    #Get history for movie item
-    history_url_radarr = makeUrl(config['radarr']['host'],
-                                 config['radarr']['port'],
-                                 'api/v3/history/movie',
-                                 params_radarr)
-    
-    histories = requests.get(history_url_radarr).json()
-    downloadsIds = []
-    for history in histories:
-        if 'downloadId' in history:
-            downloadsIds.append(history['downloadId'])
+class ArrClient:
+    def __init__(self, config: AppConfig):
+        require_requests()
+        self.config = config
+        scheme = "https" if config.ssl else "http"
+        self.base_url = f"{scheme}://{config.host}:{config.port}"
 
-    data = {
-        "id" : movie['id'],
-        "title" : movie['title'],
-        "year" : movie['year'],
-        "path" : movie['path'],
-        "downloadIds" : downloadsIds
+    def api(self, method: str, endpoint: str, params: Optional[Dict] = None):
+        params = dict(params or {})
+        params["apikey"] = self.config.api_key
+        url = f"{self.base_url}/api/v3/{endpoint.lstrip('/')}"
+        response = requests.request(method, url, params=params, timeout=30)
+        response.raise_for_status()
+        if response.text:
+            return response.json()
+        return None
+
+    def queue(self) -> List[Dict]:
+        params = {
+            "includeUnknownMovieItems": "true",
+            "includeMovie": "true",
+            "includeSeries": "true",
+            "includeEpisode": "true",
+            "page": 1,
+            "pageSize": 250,
+        }
+        data = self.api("GET", "queue", params)
+        return data.get("records", data if isinstance(data, list) else [])
+
+    def history_for(self, item: Dict) -> List[Dict]:
+        params = {
+            "page": 1,
+            "pageSize": 50,
+            "sortKey": "date",
+            "sortDirection": "descending",
+        }
+        if item.get("downloadId"):
+            params["downloadId"] = item["downloadId"]
+
+        try:
+            data = self.api("GET", "history", params)
+            records = data.get("records", data if isinstance(data, list) else [])
+            if records:
+                return records
+        except Exception:
+            pass
+
+        if self.config.media_type == "radarr" and item.get("movieId"):
+            return self.api("GET", "history/movie", {"movieId": item["movieId"]})
+
+        if self.config.media_type == "sonarr" and item.get("seriesId"):
+            return self.api("GET", "history/series", {"seriesId": item["seriesId"]})
+
+        return []
+
+    def source_title(self, item: Dict) -> Optional[str]:
+        candidates = [
+            item.get("sourceTitle"),
+            item.get("releaseTitle"),
+            item.get("downloadTitle"),
+        ]
+
+        download_id = item.get("downloadId")
+        for history in self.history_for(item):
+            if download_id and history.get("downloadId") != download_id:
+                continue
+            candidates.extend([
+                history.get("sourceTitle"),
+                history.get("releaseTitle"),
+                history.get("downloadTitle"),
+                history.get("sourceTitle", ""),
+            ])
+
+        for candidate in candidates:
+            if candidate and looks_like_release_name(candidate):
+                return candidate
+
+        return next((candidate for candidate in candidates if candidate), None)
+
+
+class QbitClient:
+    def __init__(self, config: Dict):
+        require_requests()
+        scheme = "https" if config.get("ssl", False) else "http"
+        self.base_url = f"{scheme}://{config['host']}:{config['port']}"
+        self.username = config.get("username", "")
+        self.password = config.get("password", "")
+        self.session = requests.Session()
+
+    def login(self):
+        response = self.session.post(
+            f"{self.base_url}/api/v2/auth/login",
+            data={"username": self.username, "password": self.password},
+            timeout=30,
+        )
+        response.raise_for_status()
+        if response.text != "Ok.":
+            raise RuntimeError("qBittorrent authentication failed")
+
+    def torrents(self) -> List[Dict]:
+        response = self.session.get(f"{self.base_url}/api/v2/torrents/info", timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    def files(self, torrent_hash: str) -> List[Dict]:
+        response = self.session.get(
+            f"{self.base_url}/api/v2/torrents/files",
+            params={"hash": torrent_hash},
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def rename_file(self, torrent_hash: str, old_path: str, new_path: str):
+        response = self.session.post(
+            f"{self.base_url}/api/v2/torrents/renameFile",
+            data={"hash": torrent_hash, "oldPath": old_path, "newPath": new_path},
+            timeout=30,
+        )
+        response.raise_for_status()
+        if response.status_code == 409:
+            raise RuntimeError(f"qBittorrent refused rename: {old_path} -> {new_path}")
+
+
+def load_config(path: str = "config.json") -> Dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def require_requests():
+    if requests is None:
+        raise RuntimeError("The Python package 'requests' is required to call Radarr, Sonarr, and qBittorrent APIs")
+
+
+def setup_logging():
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+
+def make_arr_configs(config: Dict) -> List[AppConfig]:
+    apps = []
+    for key, media_type in (("radarr", "radarr"), ("sonarr", "sonarr")):
+        app = config.get(key)
+        if not app or app.get("enabled", True) is False:
+            continue
+        apps.append(AppConfig(
+            name=key,
+            media_type=media_type,
+            host=app["host"],
+            port=str(app["port"]),
+            api_key=app["api_key"],
+            ssl=app.get("ssl", False),
+            enabled=app.get("enabled", True),
+        ))
+    return apps
+
+
+def is_media_path(path: str) -> bool:
+    return posixpath.splitext(path)[1].lower() in MEDIA_EXTENSIONS
+
+
+def is_associated_path(path: str) -> bool:
+    return posixpath.splitext(path)[1].lower() in ASSOCIATED_EXTENSIONS
+
+
+def safe_filename(filename: str) -> str:
+    name = INVALID_FILENAME_CHARS_RE.sub(".", filename)
+    name = re.sub(r"\.{2,}", ".", name)
+    return name.strip(" .")
+
+
+def split_qbit_path(path: str) -> Tuple[str, str, str]:
+    directory = posixpath.dirname(path)
+    basename = posixpath.basename(path)
+    stem, extension = posixpath.splitext(basename)
+    return directory, stem, extension
+
+
+def with_same_directory(old_path: str, new_basename: str) -> str:
+    directory = posixpath.dirname(old_path)
+    return posixpath.join(directory, new_basename) if directory else new_basename
+
+
+def looks_like_release_name(value: str) -> bool:
+    release_markers = ("1080", "2160", "720", "webrip", "web-dl", "bluray", "x264", "x265", "h264", "h265")
+    normalized = value.lower()
+    return "." in value or any(marker in normalized for marker in release_markers)
+
+
+def get_status_messages(item: Dict) -> List[str]:
+    messages = []
+    for status in item.get("statusMessages", []) or []:
+        messages.extend(status.get("messages", []) or [])
+        if status.get("title"):
+            messages.append(status["title"])
+    return messages
+
+
+def should_fix_item(item: Dict) -> bool:
+    if item.get("trackedDownloadState") != "importPending":
+        return False
+
+    if item.get("trackedDownloadStatus") not in ("warning", "error"):
+        return False
+
+    joined = " ".join(get_status_messages(item)).lower()
+    return any(message in joined for message in IMPORT_FIX_MESSAGES)
+
+
+def find_torrent(item: Dict, torrents: List[Dict]) -> Optional[Dict]:
+    download_id = (item.get("downloadId") or "").lower()
+    if download_id:
+        for torrent in torrents:
+            if torrent.get("hash", "").lower() == download_id:
+                return torrent
+
+    title_candidates = {
+        (item.get("title") or "").lower(),
+        (item.get("sourceTitle") or "").lower(),
     }
+    for torrent in torrents:
+        if torrent.get("name", "").lower() in title_candidates:
+            return torrent
 
-    movies_history.append(data)
-
-#MAIN
-if __name__ == "__main__":
-    #Call url_radarr with GET 
-    data = requests.get(queue_url_radarr).json()
-
-    print("Rectificarr is running...")
-
-    #Activities in Radarr shows in records key (list)
-    #An activity is a download/rewrite process. A movie can be download many times with differents torrent tyrs, each download is an activity.
-    if 'records' in data:
-        print('Processing data from Radarr')
-
-        #Loop Activies
-        for item in data['records']:
-
-            #Check if statusMessages is setted. If not, this code will initilice a fake values to avoid errors and keep minimal code
-            if len(item['statusMessages']) < 1:
-                item['statusMessages'] = [{'messages'  : [''], 'title':''}]
-
-            trackedDownloadStatus = item['trackedDownloadStatus']
-            trackedDownloadState = item['trackedDownloadState']
-            try:
-                statusMessage = item['statusMessages'][0]['messages'][0]  
-            except:
-                print(item)
-                queue_url_radarr = ""
-
-            if not "wasn't grabbed by Radarr" in statusMessage:
-                if not 'movieId' in item:
-                    for mh in movies_history:
-                        if item['downloadId'] in mh['downloadIds']:
-                            item['movieId'] = mh['id']
-                            item['movie'] = {
-                                "title" : mh['title'],
-                                "year" : mh['year'],
-                                "path" : mh['path']
-                            }
-                            break
-                    
-                    if not 'movieId' in item:
-                        break
-                
-                #Getting data from Activity
-                queue_id = item['id']
-                downloadId = item['downloadId']
-                movieId = item['movieId']
-                title = item['movie']['title']
-                year = str(item['movie']['year'])
-                path = item['movie']['path']
-                quality = item['quality']['quality']['name']
-                source = item['outputPath']
-                file_source = item['statusMessages'][0]['title']
-
-                #If the movie is in a folder
-                if not os.path.isfile(source):
-                    for f in os.listdir(source):
-                        if os.path.isfile(os.path.join(source, f)) and isMediaFile(os.path.join(source, f)):
-                            file_source = f
-
-                #Print movie title to debug
-                print("||||| {}".format(title))
-
-                #Check conditions to ensure that "Unable to parse file" error in statusMessage depends to importPending trackedDownloadState
-                if trackedDownloadStatus == 'warning' \
-                and trackedDownloadState == 'importPending' \
-                and (statusMessage == 'Unable to parse file' or statusMessage == 'Unknown Movie') :
-                    #Print movieId and absolute path to debug
-                    print("|||||||||| Movie warning detectect: {} - {}/{}".format(movieId, title, file_source))
-                    print("- Trying to rename and move to correct folder")
-                    #Trying to make a new_name and rewrite in source. After that, Radarr automaticaly will detect this change and can parse the file.
-                    try:
-                        new_name = rename(title, year, quality, file_source)
-                        print("- Old name: {}".format(file_source))
-                        print("- New name: {}".format(new_name))
-
-                        #Quick patch to solve https://github.com/fe80Grau/Rectificarr/issues/2
-                        if os.path.isfile(source):
-                            mv_source = source
-                            mv_new = source.replace(source.split('/')[-1], new_name)
-                        else:                                
-                            mv_source = source + "/" + file_source
-                            mv_new = source + "/" + new_name
-
-                        #shutil.move(mv_source, mv_new)
-
-                        #Copy file to Radarr defined movie path
-                        print("|||||Importing movie... ")
-                        if not os.path.isdir(path):
-                            os.mkdir(path)
-
-                        if not os.path.isfile("{}/{}".format(path, new_name)):
-                            shutil.copy(mv_source, "{}/{}".format(path, new_name))
-                        
-                        params_radarr = urllib.parse.urlencode({
-                            "folder" : "{}/{}".format(path, new_name),
-                            "downloadId" : downloadId,
-                            "movieid" : movieId,
-                            "apikey" : config['radarr']['api_key']
-                        })
-                        manual_import_radarr = makeUrl(config['radarr']['host'],
-                                                        config['radarr']['port'],
-                                                        'api/v3/manualimport',
-                                                        params_radarr)
-                        manual_import_result = requests.get(manual_import_radarr).json()
-                        print("import done")
-
-                        print("|||||Removing from queue...")
-                        params_radarr = urllib.parse.urlencode({
-                            "apikey" : config['radarr']['api_key'],
-                            "removeFromClient" : False,
-                            "blocklist" : False
-                        })                    
-                        delete_url_radarr = makeUrl(config['radarr']['host'],
-                                                        config['radarr']['port'],
-                                                        'api/v3/queue/{}'.format(queue_id),
-                                                        params_radarr)
-                        delete_result = requests.delete(delete_url_radarr)
-                        if delete_result.status_code == 200:
-                            print("Delete done")
-                        else:
-                            print(delete_result)
-                            print(delete_result.text)
+    return None
 
 
-                        #Rescan movie with /api/command?name=RescanMovie?movieId={movieId}
-                        print("|||||Rescanning movie... ")
-                        params_radarr = urllib.parse.urlencode({
-                            "name" : "RescanMovie",
-                            "movieid" : movieId,
-                            "apikey" : config['radarr']['api_key']
-                        })                        
-                        command_url_radarr = makeUrl(config['radarr']['host'],
-                                                        config['radarr']['port'],
-                                                        'api/v3/command',
-                                                        params_radarr)
-                        command_result = requests.get(command_url_radarr).json()
-                        print("Rescan done")
-                    except Exception:
-                        traceback.print_exc()
-    #If endpoints fails...          
+def build_radarr_basename(source_title: str, extension: str) -> str:
+    return safe_filename(f"{source_title}{extension}")
+
+
+def episode_token_from_filename(path: str) -> Optional[str]:
+    basename = posixpath.basename(path)
+    match = EPISODE_RE.search(basename)
+    if not match:
+        return None
+    return re.sub(r"\s+", "", match.group("token")).upper()
+
+
+def build_sonarr_basename(source_title: str, original_path: str) -> Optional[str]:
+    _, _, extension = split_qbit_path(original_path)
+    source_episode = EPISODE_RE.search(source_title)
+    if source_episode:
+        return safe_filename(f"{source_title}{extension}")
+
+    token = episode_token_from_filename(original_path)
+    if not token:
+        return None
+
+    if SEASON_RE.search(source_title):
+        title = SEASON_RE.sub(token, source_title, count=1)
     else:
-        print('No data found')
+        title = f"{source_title}.{token}"
+
+    return safe_filename(f"{title}{extension}")
+
+
+def media_files_for_rename(files: List[Dict]) -> List[Dict]:
+    media_files = [file for file in files if is_media_path(file.get("name", ""))]
+    if len(media_files) <= 1:
+        return media_files
+
+    largest_size = max((file.get("size", 0) for file in media_files), default=0)
+    filtered = []
+    for file in media_files:
+        path = file.get("name", "")
+        size = file.get("size", 0)
+        basename = posixpath.basename(path)
+        looks_like_sample = bool(SAMPLE_RE.search(basename))
+        is_small_sample = largest_size > 0 and size > 0 and size <= largest_size * 0.2
+        is_exact_sample = posixpath.splitext(basename)[0].lower() == "sample"
+
+        if looks_like_sample and (is_small_sample or is_exact_sample):
+            LOGGER.info("Skipping sample file: %s", path)
+            continue
+
+        filtered.append(file)
+
+    return filtered
+
+
+def radarr_media_files_for_rename(files: List[Dict]) -> List[Dict]:
+    media_files = media_files_for_rename(files)
+    if len(media_files) <= 1:
+        return media_files
+    return [max(media_files, key=lambda file: file.get("size", 0))]
+
+
+def associated_files_for_media(files: List[Dict], media_path: str) -> List[Dict]:
+    media_directory, media_stem, _ = split_qbit_path(media_path)
+    matches = []
+    for file in files:
+        path = file.get("name", "")
+        if not is_associated_path(path):
+            continue
+
+        directory, stem, _ = split_qbit_path(path)
+        if directory != media_directory:
+            continue
+
+        if stem == media_stem or stem.startswith(f"{media_stem}."):
+            matches.append(file)
+
+    return matches
+
+
+def build_rename_plan(media_type: str, source_title: str, files: List[Dict]) -> List[Tuple[str, str]]:
+    plan = []
+    media_files = radarr_media_files_for_rename(files) if media_type == "radarr" else media_files_for_rename(files)
+
+    for file in media_files:
+        old_path = file.get("name", "")
+        if media_type == "radarr":
+            _, _, extension = split_qbit_path(old_path)
+            new_basename = build_radarr_basename(source_title, extension)
+        else:
+            new_basename = build_sonarr_basename(source_title, old_path)
+
+        if not new_basename:
+            continue
+
+        new_path = with_same_directory(old_path, new_basename)
+        if new_path == old_path:
+            continue
+
+        plan.append((old_path, new_path))
+
+        _, old_stem, _ = split_qbit_path(old_path)
+        new_stem, _ = posixpath.splitext(new_basename)
+        for associated_file in associated_files_for_media(files, old_path):
+            assoc_old = associated_file["name"]
+            _, assoc_stem, assoc_ext = split_qbit_path(assoc_old)
+            suffix = assoc_stem[len(old_stem):]
+            assoc_new = with_same_directory(assoc_old, safe_filename(f"{new_stem}{suffix}{assoc_ext}"))
+            if assoc_new != assoc_old:
+                plan.append((assoc_old, assoc_new))
+
+    return deduplicate_plan(plan)
+
+
+def deduplicate_plan(plan: Iterable[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    seen_old = set()
+    seen_new = set()
+    deduped = []
+    for old_path, new_path in plan:
+        if old_path in seen_old:
+            continue
+        if new_path in seen_new:
+            LOGGER.warning("Skipping duplicate target: %s", new_path)
+            continue
+        seen_old.add(old_path)
+        seen_new.add(new_path)
+        deduped.append((old_path, new_path))
+    return deduped
+
+
+def process_app(arr: ArrClient, qbit: QbitClient, dry_run: bool = False):
+    LOGGER.info("Processing %s queue", arr.config.name)
+    torrents = qbit.torrents()
+    checked = 0
+    fixed = 0
+    for item in arr.queue():
+        checked += 1
+        if not should_fix_item(item):
+            continue
+
+        source_title = arr.source_title(item)
+        if not source_title:
+            LOGGER.warning("Skipping queue item %s: no source title found", item.get("id"))
+            continue
+
+        torrent = find_torrent(item, torrents)
+        if not torrent:
+            LOGGER.warning("Skipping %s: no matching qBittorrent torrent found", source_title)
+            continue
+
+        torrent_hash = torrent["hash"]
+        files = qbit.files(torrent_hash)
+        plan = build_rename_plan(arr.config.media_type, source_title, files)
+        if not plan:
+            LOGGER.info("Nothing to rename for %s", source_title)
+            continue
+
+        LOGGER.info("Renaming files for %s", source_title)
+        for old_path, new_path in plan:
+            LOGGER.info("%s%s -> %s", "[dry-run] " if dry_run else "", old_path, new_path)
+            if not dry_run:
+                qbit.rename_file(torrent_hash, old_path, new_path)
+        fixed += 1
+
+    LOGGER.info("Finished %s queue: checked=%s fixed=%s", arr.config.name, checked, fixed)
+
+
+def run_once(config_path: str, dry_run: bool = False):
+    config = load_config(config_path)
+    if "qbittorrent" not in config:
+        raise RuntimeError("Missing qbittorrent config section")
+
+    LOGGER.info("Starting qBit-Rectificarr cycle mode=%s config=%s", "dry-run" if dry_run else "run", config_path)
+    qbit = QbitClient(config["qbittorrent"])
+    qbit.login()
+    LOGGER.info("Connected to qBittorrent")
+
+    apps = make_arr_configs(config)
+    if not apps:
+        raise RuntimeError("No enabled Radarr/Sonarr config found")
+
+    for app_config in apps:
+        process_app(ArrClient(app_config), qbit, dry_run=dry_run)
+    LOGGER.info("Cycle complete")
+
+
+def main():
+    setup_logging()
+    mode = os.getenv("MODE", "run").lower()
+    config_path = os.getenv("CONFIG_PATH", "config.json")
+    interval = int(os.getenv("RUN_INTERVAL", "300"))
+
+    if mode not in ("run", "dry-run", "loop"):
+        raise RuntimeError("MODE must be one of: run, dry-run, loop")
+
+    LOGGER.info("Booting qBit-Rectificarr mode=%s interval=%ss", mode, interval)
+    if mode == "loop":
+        while True:
+            try:
+                run_once(config_path, dry_run=False)
+            except Exception:
+                LOGGER.exception("Cycle failed")
+            LOGGER.info("Sleeping %s seconds", interval)
+            time.sleep(interval)
+    else:
+        run_once(config_path, dry_run=(mode == "dry-run"))
+
+
+if __name__ == "__main__":
+    main()

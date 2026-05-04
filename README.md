@@ -1,49 +1,129 @@
-# Rectificarr
-* Sometimes Torrent Trackers set shit names in movie files.
-* This shit causes "Unable to parse file" or "Unknown Movie" error in Radarr Activity, then Radarr can't rewrite file to setted Path.
-* This script uses Radarr API to check if exist an activity with this error and force rename
-* Optional, This project contains posttorrent.sh Bash script integrated with Transmission Daemon to auto-unrar torrent downloads. 
+# qBit-Rectificarr
 
-## Requirements
-* Python3
-* Transmission Daemon
-* Radarr
-* Radarr API Key
+qBit-Rectificarr fixes Radarr/Sonarr imports where the release was grabbed with a good Custom Format score, but the downloaded file name does not contain the tags used for scoring.
 
-## Installation
-* I recommend /opt/ in Linux or C:\ProgramData in Windows, to allocate Rectificarr.
-* The next steps are tested over Ubuntu 22.04 LTS
-```console
-cd /opt && git clone https://github.com/fe80Grau/Rectificarr.git
+It watches the Radarr and Sonarr queues for import warnings, finds the matching torrent in qBittorrent, and renames the torrent files before import so the Arr parser sees the original release tags.
+
+## What it fixes
+
+- Radarr files are renamed from the grabbed release name while keeping the original extension.
+- Sonarr single episodes use the grabbed release name while keeping the original extension.
+- Sonarr season packs inject the episode token from each file into the season release name.
+- Associated subtitle/info files with the same base name are renamed with the video file.
+- Sample videos are ignored when a torrent has more than one video file.
+- Import warnings caused by `Unable to parse file`, `Unknown Movie`, and `Not a Custom Format upgrade` are handled.
+
+## Examples
+
+Radarr:
+
+```text
+sourceTitle = Nom.Release.2024.MULTI.1080p.WEBRip.x265-GROUP
+file        = movie.mkv
+result      = Nom.Release.2024.MULTI.1080p.WEBRip.x265-GROUP.mkv
 ```
 
-> ## Rectificarr
-> * Edit config.json with your values. (To found Radarr API Key go to Radarr web interface -> Settings -> General -> Show Advanced -> Search for API Key in Security section).
-> * Save it
-> * Check if is it working. 
-> ```console
-> /usr/bin/python3 /opt/Rectificarr/main.py
-> ```
-> * If don't error presents, it's ok
-> * Add cronjob with root privileges. Each 2 hours Python3 runs Rectificarr script. (Edit cron values if you want another interval)
-> ```console
-> cd /etc/cron.d &&
-> sudo echo "00 */2 * * * root /usr/bin/python3 /opt/Rectificarr/main.py" > rectificarr
-> ```
+Sonarr season pack:
 
-> ## posttorrent.sh / after download unrar for Transmission (Only for Linux)
-> * To make the script work you have to add/change these lines in a configuration file named "settings.json" (usually /etc/transmission-daemon/settings.json).
-> ```json
-> "script-torrent-done-enabled": true, 
-> "script-torrent-done-filename": "/opt/Rectificarr/posttorrent.sh", 
-> ```
-> * Reload Transmission Daemon. To set new settins.json, important to use next command. (If you uses service or systemcl your changes in settings.json will be not applied, and will be replaced with old values)
-> ```console
-> invoke-rc.d transmission-daemon reload
-> ```
+```text
+sourceTitle = Nom.Release.S01.MULTI.1080p.WEBRip.AC3.5.1.x265-P2P
+file        = Nom.Release S01E01 Pilot.mkv
+result      = Nom.Release.S01E01.MULTI.1080p.WEBRip.AC3.5.1.x265-P2P.mkv
+```
 
-## Credits
-[![GitHub - ShieldsIO](https://img.shields.io/badge/GitHub-ShieldsIO-42b983?logo=GitHub)](https://github.com/badges/shields)
-[![GitHub - Transmission](https://img.shields.io/badge/GitHub-Transmission-D70008?logo=GitHub)](https://github.com/transmission/transmission)
-[![GitHub - Radarr](https://img.shields.io/badge/GitHub-Radarr-ffc230?logo=GitHub)](https://github.com/Radarr/Radarr)
-[![Transmission Forum - Killemov](https://img.shields.io/badge/Transmission_Forum-Killemov-4692BF)](https://forum.transmissionbt.com/viewtopic.php?t=10364)
+Sonarr single episode:
+
+```text
+sourceTitle = Nom.Release.S01E22.MULTI.1080p.WEBRip.AC3.5.1.x265-P2P
+file        = Episode22.mkv
+result      = Nom.Release.S01E22.MULTI.1080p.WEBRip.AC3.5.1.x265-P2P.mkv
+```
+
+## Configuration
+
+Edit `config.json`.
+
+```json
+{
+    "radarr": {
+        "enabled": true,
+        "host": "your_radarr_host",
+        "port": "your_radarr_port",
+        "api_key": "your_radarr_api_key",
+        "ssl": false
+    },
+    "sonarr": {
+        "enabled": true,
+        "host": "your_sonarr_host",
+        "port": "your_sonarr_port",
+        "api_key": "your_sonarr_api_key",
+        "ssl": false
+    },
+    "qbittorrent": {
+        "host": "your_qbittorrent_host",
+        "port": "your_qbittorrent_port",
+        "username": "your_qbittorrent_username",
+        "password": "your_qbittorrent_password",
+        "ssl": false
+    }
+}
+```
+
+## Usage
+
+Preview planned renames:
+
+```console
+MODE=dry-run python main.py
+```
+
+Apply renames:
+
+```console
+MODE=run python main.py
+```
+
+Run continuously every 5 minutes:
+
+```console
+MODE=loop RUN_INTERVAL=300 python main.py
+```
+
+Run it frequently enough that it can act while items are still in `importPending`. A cron job or scheduled task every few minutes is usually the right shape.
+
+## Docker Compose
+
+An example Compose file is available in `docker-compose.example.yml`. It is intentionally Unraid-friendly: one service, configuration through environment variables, and `config.json` mounted read-only.
+
+Run continuously:
+
+```console
+docker compose -f docker-compose.example.yml up -d --build
+```
+
+Preview planned renames with the same Compose service:
+
+```console
+docker compose -f docker-compose.example.yml run --rm -e MODE=dry-run qbit-rectificarr
+```
+
+Useful environment variables:
+
+- `MODE`: `run`, `dry-run`, or `loop`
+- `RUN_INTERVAL`: seconds between cycles when `MODE=loop`
+- `CONFIG_PATH`: path to `config.json` inside the container
+- `LOG_LEVEL`: `DEBUG`, `INFO`, `WARNING`, or `ERROR`
+- `TZ`: container timezone
+
+## Requirements
+
+- Python 3
+- `requests`
+- Radarr and/or Sonarr
+- qBittorrent Web UI enabled
+
+Install dependency:
+
+```console
+pip install requests
+```
