@@ -41,7 +41,7 @@ result      = Nom.Release.S01E22.MULTI.1080p.WEBRip.AC3.5.1.x265-P2P.mkv
 
 ## Configuration
 
-Edit `config.json`.
+On first start, qBit-Rectificarr creates `config.json` automatically if it does not exist. Edit the generated file, then restart the container or script.
 
 ```json
 {
@@ -93,7 +93,7 @@ Run it frequently enough that it can act while items are still in `importPending
 
 ## Docker Compose
 
-An example Compose file is available in `docker-compose.example.yml`. It is intentionally Unraid-friendly: one service, configuration through environment variables, and `config.json` mounted read-only.
+An example Compose file is available in `docker-compose.example.yml`. It is intentionally Unraid-friendly: one service, configuration through environment variables, and one appdata folder mounted to `/config`.
 
 Run continuously:
 
@@ -114,6 +114,22 @@ Useful environment variables:
 - `CONFIG_PATH`: path to `config.json` inside the container
 - `LOG_LEVEL`: `DEBUG`, `INFO`, `WARNING`, or `ERROR`
 - `TZ`: container timezone
+
+For Unraid, use a path mapping like this:
+
+```text
+Host Path:      /mnt/user/appdata/qBit-Rectificarr
+Container Path: /config
+Access Mode:    Read/Write
+```
+
+On first boot, the container creates:
+
+```text
+/mnt/user/appdata/qBit-Rectificarr/config.json
+```
+
+Fill it, then restart the container.
 
 ## Requirements
 

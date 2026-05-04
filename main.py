@@ -42,6 +42,34 @@ SAMPLE_RE = re.compile(r"(^|[.\s_\-\[\(])sample([.\s_\-\]\)]|$)", re.IGNORECASE)
 
 LOGGER = logging.getLogger("qbit_rectificarr")
 
+DEFAULT_CONFIG = {
+    "radarr": {
+        "enabled": True,
+        "host": "your_radarr_host",
+        "port": "your_radarr_port",
+        "api_key": "your_radarr_api_key",
+        "ssl": False,
+    },
+    "sonarr": {
+        "enabled": False,
+        "host": "your_sonarr_host",
+        "port": "your_sonarr_port",
+        "api_key": "your_sonarr_api_key",
+        "ssl": False,
+    },
+    "qbittorrent": {
+        "host": "your_qbittorrent_host",
+        "port": "your_qbittorrent_port",
+        "username": "your_qbittorrent_username",
+        "password": "your_qbittorrent_password",
+        "ssl": False,
+    },
+}
+
+
+class ConfigCreatedError(RuntimeError):
+    pass
+
 
 @dataclass
 class AppConfig:
@@ -178,7 +206,21 @@ class QbitClient:
             raise RuntimeError(f"qBittorrent refused rename: {old_path} -> {new_path}")
 
 
+def create_default_config(path: str):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(DEFAULT_CONFIG, f, indent=4)
+        f.write("\n")
+
+
 def load_config(path: str = "config.json") -> Dict:
+    if not os.path.exists(path):
+        create_default_config(path)
+        raise ConfigCreatedError(f"Created default config at {path}. Edit it, then restart qBit-Rectificarr.")
+
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -485,12 +527,20 @@ def main():
         while True:
             try:
                 run_once(config_path, dry_run=False)
+            except ConfigCreatedError as error:
+                LOGGER.error("%s", error)
+                LOGGER.error("Container is waiting. Edit the generated config file, then restart qBit-Rectificarr.")
+                while True:
+                    time.sleep(3600)
             except Exception:
                 LOGGER.exception("Cycle failed")
             LOGGER.info("Sleeping %s seconds", interval)
             time.sleep(interval)
     else:
-        run_once(config_path, dry_run=(mode == "dry-run"))
+        try:
+            run_once(config_path, dry_run=(mode == "dry-run"))
+        except ConfigCreatedError as error:
+            LOGGER.error("%s", error)
 
 
 if __name__ == "__main__":

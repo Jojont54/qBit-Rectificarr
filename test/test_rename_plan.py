@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import mock_open, patch
 
-from main import build_rename_plan
+from main import ConfigCreatedError, build_rename_plan, load_config
 
 
 class RenamePlanTests(unittest.TestCase):
@@ -93,6 +94,15 @@ class RenamePlanTests(unittest.TestCase):
         self.assertEqual(plan, [
             ("Some Show S01E03 Sample.mkv", "Some.Show.S01E03.MULTI.1080p.WEBRip.x265-GROUP.mkv"),
         ])
+
+    def test_missing_config_is_created(self):
+        with patch("main.os.path.exists", return_value=False), \
+                patch("main.os.makedirs") as makedirs, \
+                patch("builtins.open", mock_open()):
+            with self.assertRaises(ConfigCreatedError):
+                load_config("/config/config.json")
+
+        makedirs.assert_called_once_with("/config", exist_ok=True)
 
 
 if __name__ == "__main__":

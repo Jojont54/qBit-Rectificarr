@@ -10,4 +10,4 @@ services:
       RUN_INTERVAL: 300
       LOG_LEVEL: INFO
     volumes:
-      - ./config.json:/config/config.json:ro
+      - ./config:/config
