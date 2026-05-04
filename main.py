@@ -36,6 +36,10 @@ EPISODE_RE = re.compile(
     r"(?P<token>S(?P<season>\d{1,2})\s*E(?P<episode>\d{1,3})(?:\s*(?:-|E)\s*\d{1,3})*)",
     re.IGNORECASE,
 )
+ALT_EPISODE_RE = re.compile(
+    r"(?<!\d)(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?:\s*(?:-|x)\s*\d{1,3})*",
+    re.IGNORECASE,
+)
 SEASON_RE = re.compile(r"S\d{1,2}(?!\s*E\d)", re.IGNORECASE)
 INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 SAMPLE_RE = re.compile(r"(^|[.\s_\-\[\(])sample([.\s_\-\]\)]|$)", re.IGNORECASE)
@@ -346,6 +350,22 @@ def should_fix_item(item: Dict) -> bool:
     return any(message in joined for message in IMPORT_FIX_MESSAGES)
 
 
+def log_ignored_queue_item(item: Dict):
+    state = item.get("trackedDownloadState")
+    status = item.get("trackedDownloadStatus")
+    if state != "importPending" and status not in ("warning", "error"):
+        return
+
+    LOGGER.debug(
+        "Ignoring queue item id=%s title=%s state=%s status=%s messages=%s",
+        item.get("id"),
+        item.get("title") or item.get("sourceTitle"),
+        state,
+        status,
+        " | ".join(get_status_messages(item)),
+    )
+
+
 def find_torrent(item: Dict, torrents: List[Dict]) -> Optional[Dict]:
     download_id = (item.get("downloadId") or "").lower()
     if download_id:
@@ -371,9 +391,16 @@ def build_radarr_basename(source_title: str, extension: str) -> str:
 def episode_token_from_filename(path: str) -> Optional[str]:
     basename = posixpath.basename(path)
     match = EPISODE_RE.search(basename)
-    if not match:
-        return None
-    return re.sub(r"\s+", "", match.group("token")).upper()
+    if match:
+        return re.sub(r"\s+", "", match.group("token")).upper()
+
+    match = ALT_EPISODE_RE.search(basename)
+    if match:
+        season = int(match.group("season"))
+        episode = int(match.group("episode"))
+        return f"S{season:02d}E{episode:02d}"
+
+    return None
 
 
 def build_sonarr_basename(source_title: str, original_path: str) -> Optional[str]:
@@ -501,6 +528,7 @@ def process_app(arr: ArrClient, qbit: QbitClient, dry_run: bool = False):
     for item in arr.queue():
         checked += 1
         if not should_fix_item(item):
+            log_ignored_queue_item(item)
             continue
 
         source_title = arr.source_title(item)

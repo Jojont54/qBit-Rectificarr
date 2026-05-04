@@ -95,6 +95,27 @@ class RenamePlanTests(unittest.TestCase):
             ("Some Show S01E03 Sample.mkv", "Some.Show.S01E03.MULTI.1080p.WEBRip.x265-GROUP.mkv"),
         ])
 
+    def test_sonarr_season_pack_supports_1x_episode_tokens(self):
+        plan = build_rename_plan(
+            "sonarr",
+            "Rooster.S01.MULTi.VFF.1080p.WEB.EAC3.5.1.H265-FW",
+            [
+                {"name": "Rooster.1x01.MULTi.1080p.WEB.H265-FW/Rooster.1x01.mkv"},
+                {"name": "Rooster.1x02.MULTi.1080p.WEB.H265-FW/Rooster.1x02.mkv"},
+            ],
+        )
+
+        self.assertEqual(plan, [
+            (
+                "Rooster.1x01.MULTi.1080p.WEB.H265-FW/Rooster.1x01.mkv",
+                "Rooster.1x01.MULTi.1080p.WEB.H265-FW/Rooster.S01E01.MULTi.VFF.1080p.WEB.EAC3.5.1.H265-FW.mkv",
+            ),
+            (
+                "Rooster.1x02.MULTi.1080p.WEB.H265-FW/Rooster.1x02.mkv",
+                "Rooster.1x02.MULTi.1080p.WEB.H265-FW/Rooster.S01E02.MULTi.VFF.1080p.WEB.EAC3.5.1.H265-FW.mkv",
+            ),
+        ])
+
     def test_missing_config_is_created(self):
         with patch("main.os.path.exists", return_value=False), \
                 patch("main.os.makedirs") as makedirs, \
