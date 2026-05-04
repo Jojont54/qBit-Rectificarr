@@ -116,6 +116,8 @@ Useful environment variables:
 - `CONFIG_PATH`: path to `config.json` inside the container
 - `LOG_LEVEL`: `DEBUG`, `INFO`, `WARNING`, or `ERROR`
 - `LOG_FILE`: log file path inside the container, defaults to `/config/logs/qbit-rectificarr.log`
+- `LOG_MAX_BYTES`: max size of the active log file, defaults to `1048576`
+- `LOG_BACKUP_COUNT`: number of rotated log files to keep, defaults to `3`
 - `TZ`: container timezone
 
 For Unraid, use a path mapping like this:
@@ -138,6 +140,15 @@ Logs are written to both the container output and:
 
 ```text
 /mnt/user/appdata/qBit-Rectificarr/logs/qbit-rectificarr.log
+```
+
+The log file rotates at 1 MB by default and keeps 3 archives:
+
+```text
+qbit-rectificarr.log
+qbit-rectificarr.log.1
+qbit-rectificarr.log.2
+qbit-rectificarr.log.3
 ```
 
 ## Requirements

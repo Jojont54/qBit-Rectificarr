@@ -3,6 +3,7 @@
 
 import json
 import logging
+import logging.handlers
 import os
 import posixpath
 import re
@@ -255,7 +256,12 @@ def setup_logging():
             if log_dir:
                 os.makedirs(log_dir, exist_ok=True)
 
-            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_file,
+                maxBytes=int(os.getenv("LOG_MAX_BYTES", "1048576")),
+                backupCount=int(os.getenv("LOG_BACKUP_COUNT", "3")),
+                encoding="utf-8",
+            )
             file_handler.setLevel(level)
             file_handler.setFormatter(formatter)
             LOGGER.addHandler(file_handler)

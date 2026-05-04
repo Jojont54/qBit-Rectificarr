@@ -10,5 +10,7 @@ services:
       RUN_INTERVAL: 300
       LOG_LEVEL: INFO
       LOG_FILE: /config/logs/qbit-rectificarr.log
+      LOG_MAX_BYTES: 1048576
+      LOG_BACKUP_COUNT: 3
     volumes:
       - ./config:/config

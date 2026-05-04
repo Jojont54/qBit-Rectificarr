@@ -195,7 +195,7 @@ class RenamePlanTests(unittest.TestCase):
         try:
             with patch.dict("main.os.environ", {"LOG_FILE": "/config/logs/qbit-rectificarr.log"}), \
                     patch("main.os.makedirs") as makedirs, \
-                    patch("logging.FileHandler"):
+                    patch("logging.handlers.RotatingFileHandler"):
                 setup_logging()
 
             makedirs.assert_called_once_with("/config/logs", exist_ok=True)
