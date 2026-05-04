@@ -392,13 +392,12 @@ def build_radarr_basename(source_title: str, extension: str) -> str:
     return safe_filename(f"{source_title}{extension}")
 
 
-def episode_token_from_filename(path: str) -> Optional[str]:
-    basename = posixpath.basename(path)
-    match = EPISODE_RE.search(basename)
+def episode_token_from_text(text: str) -> Optional[str]:
+    match = EPISODE_RE.search(text)
     if match:
         return re.sub(r"\s+", "", match.group("token")).upper()
 
-    match = ALT_EPISODE_RE.search(basename)
+    match = ALT_EPISODE_RE.search(text)
     if match:
         season = int(match.group("season"))
         episode = int(match.group("episode"))
@@ -407,13 +406,31 @@ def episode_token_from_filename(path: str) -> Optional[str]:
     return None
 
 
-def build_sonarr_basename(source_title: str, original_path: str) -> Optional[str]:
+def episode_token_from_path(path: str) -> Optional[str]:
+    parts = [part for part in path.split("/") if part]
+    if not parts:
+        return None
+
+    for part in [parts[-1], *reversed(parts[:-1])]:
+        token = episode_token_from_text(part)
+        if token:
+            return token
+
+    return None
+
+
+def build_sonarr_basename(source_title: str, original_path: str, force_file_episode: bool = False) -> Optional[str]:
     _, _, extension = split_qbit_path(original_path)
+    token = episode_token_from_path(original_path)
     source_episode = EPISODE_RE.search(source_title)
     if source_episode:
+        if force_file_episode:
+            if not token:
+                return None
+            title = EPISODE_RE.sub(token, source_title, count=1)
+            return safe_filename(f"{title}{extension}")
         return safe_filename(f"{source_title}{extension}")
 
-    token = episode_token_from_filename(original_path)
     if not token:
         return None
 
@@ -477,6 +494,7 @@ def associated_files_for_media(files: List[Dict], media_path: str) -> List[Dict]
 def build_rename_plan(media_type: str, source_title: str, files: List[Dict]) -> List[Tuple[str, str]]:
     plan = []
     media_files = radarr_media_files_for_rename(files) if media_type == "radarr" else media_files_for_rename(files)
+    force_file_episode = media_type == "sonarr" and len(media_files) > 1
 
     for file in media_files:
         old_path = file.get("name", "")
@@ -484,7 +502,7 @@ def build_rename_plan(media_type: str, source_title: str, files: List[Dict]) -> 
             _, _, extension = split_qbit_path(old_path)
             new_basename = build_radarr_basename(source_title, extension)
         else:
-            new_basename = build_sonarr_basename(source_title, old_path)
+            new_basename = build_sonarr_basename(source_title, old_path, force_file_episode=force_file_episode)
 
         if not new_basename:
             continue

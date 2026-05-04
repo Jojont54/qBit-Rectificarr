@@ -116,6 +116,72 @@ class RenamePlanTests(unittest.TestCase):
             ),
         ])
 
+    def test_sonarr_pack_keeps_each_file_episode_when_source_title_has_single_episode(self):
+        plan = build_rename_plan(
+            "sonarr",
+            "High.Potential.S02E11.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW",
+            [
+                {
+                    "name": (
+                        "High.Potential.S02.MULTi.1080p.WEB.H264-FW/"
+                        "High.Potential.S02E01.MULTi.1080p.WEB.H264-FW/"
+                        "High.Potential.S02E01.MULTi.1080p.WEB.H264-FW.mkv"
+                    )
+                },
+                {
+                    "name": (
+                        "High.Potential.S02.MULTi.1080p.WEB.H264-FW/"
+                        "High.Potential.S02E02.MULTi.1080p.WEB.H264-FW/"
+                        "High.Potential.S02E02.MULTi.1080p.WEB.H264-FW.mkv"
+                    )
+                },
+            ],
+        )
+
+        self.assertEqual(plan, [
+            (
+                "High.Potential.S02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E01.MULTi.1080p.WEB.H264-FW/High.Potential.S02E01.MULTi.1080p.WEB.H264-FW.mkv",
+                "High.Potential.S02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E01.MULTi.1080p.WEB.H264-FW/High.Potential.S02E01.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW.mkv",
+            ),
+            (
+                "High.Potential.S02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E02.MULTi.1080p.WEB.H264-FW.mkv",
+                "High.Potential.S02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E02.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW.mkv",
+            ),
+        ])
+
+    def test_sonarr_episode_folder_token_is_used_when_file_name_has_no_episode(self):
+        plan = build_rename_plan(
+            "sonarr",
+            "High.Potential.S02E11.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW",
+            [
+                {
+                    "name": (
+                        "High.Potential.S02.MULTi.1080p.WEB.H264-FW/"
+                        "High.Potential.S02E01.MULTi.1080p.WEB.H264-FW/"
+                        "video.mkv"
+                    )
+                },
+                {
+                    "name": (
+                        "High.Potential.S02.MULTi.1080p.WEB.H264-FW/"
+                        "High.Potential.S02E02.MULTi.1080p.WEB.H264-FW/"
+                        "video.mkv"
+                    )
+                },
+            ],
+        )
+
+        self.assertEqual(plan, [
+            (
+                "High.Potential.S02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E01.MULTi.1080p.WEB.H264-FW/video.mkv",
+                "High.Potential.S02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E01.MULTi.1080p.WEB.H264-FW/High.Potential.S02E01.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW.mkv",
+            ),
+            (
+                "High.Potential.S02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E02.MULTi.1080p.WEB.H264-FW/video.mkv",
+                "High.Potential.S02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E02.MULTi.1080p.WEB.H264-FW/High.Potential.S02E02.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW.mkv",
+            ),
+        ])
+
     def test_missing_config_is_created(self):
         with patch("main.os.path.exists", return_value=False), \
                 patch("main.os.makedirs") as makedirs, \
