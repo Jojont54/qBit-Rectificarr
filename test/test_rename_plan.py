@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import mock_open, patch
 
-from main import LOGGER, ConfigCreatedError, build_rename_plan, is_placeholder_config, load_config, setup_logging, should_fix_item
+from main import LOGGER, AppConfig, ArrClient, ConfigCreatedError, build_rename_plan, is_placeholder_config, load_config, normalize_sonarr_pack_source_title, setup_logging, should_fix_item
 
 
 class RenamePlanTests(unittest.TestCase):
@@ -149,6 +149,12 @@ class RenamePlanTests(unittest.TestCase):
             ),
         ])
 
+    def test_sonarr_pack_source_episode_is_normalized_to_season_template(self):
+        self.assertEqual(
+            normalize_sonarr_pack_source_title("High.Potential.S02E11.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW"),
+            "High.Potential.S02.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW",
+        )
+
     def test_sonarr_episode_folder_token_is_used_when_file_name_has_no_episode(self):
         plan = build_rename_plan(
             "sonarr",
@@ -205,6 +211,51 @@ class RenamePlanTests(unittest.TestCase):
     def test_placeholder_config_is_detected(self):
         self.assertTrue(is_placeholder_config({"qbittorrent": {"host": "your_qbittorrent_host"}}))
         self.assertFalse(is_placeholder_config({"qbittorrent": {"host": "192.168.1.10"}}))
+
+    def test_sonarr_source_title_prefers_richer_matching_history_release(self):
+        client = ArrClient.__new__(ArrClient)
+        client.config = AppConfig("sonarr", "sonarr", "sonarr", "8989", "api")
+        client.history_for = lambda item: [
+            {
+                "downloadId": "abc",
+                "sourceTitle": "High.Potential.S02.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW",
+            }
+        ]
+        item = {
+            "downloadId": "abc",
+            "title": "High.Potential.S02.MULTi.1080p.WEB.H264-FW",
+            "statusMessages": [{
+                "messages": ["Not a Custom Format upgrade for existing episode file(s). New: [Season Pack]"],
+            }],
+        }
+
+        self.assertEqual(
+            client.source_title(item),
+            "High.Potential.S02.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW",
+        )
+
+    def test_sonarr_source_title_beats_richer_non_source_title(self):
+        client = ArrClient.__new__(ArrClient)
+        client.config = AppConfig("sonarr", "sonarr", "sonarr", "8989", "api")
+        client.history_for = lambda item: [
+            {
+                "downloadId": "abc",
+                "sourceTitle": "High.Potential.S02.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW",
+                "title": "Wrong.Title.S02.MULTi.VFF.2160p.WEB.EAC3.7.1.H265-GROUP",
+            }
+        ]
+        item = {
+            "downloadId": "abc",
+            "sourceTitle": "Poor.Queue.Title.S02.MULTi.1080p.WEB.H264-FW",
+            "statusMessages": [{
+                "messages": ["Not a Custom Format upgrade for existing episode file(s). New: [Season Pack]"],
+            }],
+        }
+
+        self.assertEqual(
+            client.source_title(item),
+            "High.Potential.S02.MULTi.VFF.1080p.WEB.EAC3.5.1.H264-FW",
+        )
 
     def test_not_custom_format_upgrade_is_fixed_even_when_not_import_pending(self):
         item = {

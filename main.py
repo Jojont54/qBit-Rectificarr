@@ -143,28 +143,37 @@ class ArrClient:
         return []
 
     def source_title(self, item: Dict) -> Optional[str]:
-        candidates = [
-            item.get("sourceTitle"),
-            item.get("releaseTitle"),
-            item.get("downloadTitle"),
-        ]
+        candidates = []
 
         download_id = item.get("downloadId")
-        for history in self.history_for(item):
-            if download_id and history.get("downloadId") != download_id:
-                continue
-            candidates.extend([
-                history.get("sourceTitle"),
-                history.get("releaseTitle"),
-                history.get("downloadTitle"),
-                history.get("sourceTitle", ""),
-            ])
+        histories = self.history_for(item)
+        matching_histories = [history for history in histories if download_ids_match(download_id, history.get("downloadId"))]
+        other_histories = [history for history in histories if history not in matching_histories]
 
-        for candidate in candidates:
-            if candidate and looks_like_release_name(candidate):
-                return candidate
+        for priority, history_group in ((0, matching_histories), (1, other_histories)):
+            for history in history_group:
+                add_source_title_candidate(candidates, history, priority)
 
-        return next((candidate for candidate in candidates if candidate), None)
+        add_source_title_candidate(candidates, item, 2)
+
+        candidates = deduplicate_title_candidates(candidates)
+        release_candidates = [candidate for candidate in candidates if looks_like_release_name(candidate["title"])]
+        if release_candidates:
+            return best_title_candidate(release_candidates)
+
+        fallback_candidates = []
+        for priority, history_group in ((3, matching_histories), (4, other_histories)):
+            for history in history_group:
+                add_fallback_title_candidates(fallback_candidates, history, priority)
+        add_fallback_title_candidates(fallback_candidates, item, 5)
+
+        fallback_candidates = deduplicate_title_candidates(fallback_candidates)
+        release_candidates = [candidate for candidate in fallback_candidates if looks_like_release_name(candidate["title"])]
+        if release_candidates:
+            LOGGER.warning("Falling back to non-sourceTitle release name: %s", best_title_candidate(release_candidates))
+            return best_title_candidate(release_candidates)
+
+        return fallback_candidates[0]["title"] if fallback_candidates else None
 
 
 class QbitClient:
@@ -209,6 +218,62 @@ class QbitClient:
         response.raise_for_status()
         if response.status_code == 409:
             raise RuntimeError(f"qBittorrent refused rename: {old_path} -> {new_path}")
+
+
+def download_ids_match(left: Optional[str], right: Optional[str]) -> bool:
+    if not left or not right:
+        return False
+
+    left = str(left).lower()
+    right = str(right).lower()
+    return left == right or left in right or right in left
+
+
+def add_source_title_candidate(candidates: List[Dict], item: Dict, priority: int):
+    title = item.get("sourceTitle")
+    if title:
+        candidates.append({"title": title, "priority": priority, "field": "sourceTitle"})
+
+
+def add_fallback_title_candidates(candidates: List[Dict], item: Dict, priority: int):
+    for field in ("releaseTitle", "downloadTitle", "title"):
+        title = item.get(field)
+        if title:
+            candidates.append({"title": title, "priority": priority, "field": field})
+
+
+def deduplicate_title_candidates(candidates: List[Dict]) -> List[Dict]:
+    deduped = []
+    seen = set()
+    for candidate in candidates:
+        title = candidate["title"]
+        if title in seen:
+            continue
+        seen.add(title)
+        deduped.append(candidate)
+    return deduped
+
+
+def title_detail_score(title: str) -> int:
+    markers = (
+        "vff", "vfq", "french", "truefrench", "multi", "multi",
+        "eac3", "ddp", "dd+", "atmos", "dts", "aac", "ac3",
+        "5.1", "7.1", "hdr", "dv", "x265", "h265", "x264", "h264",
+        "web-dl", "webrip", "bluray", "remux",
+    )
+    normalized = title.lower()
+    return sum(1 for marker in markers if marker in normalized)
+
+
+def best_title_candidate(candidates: List[Dict]) -> str:
+    return max(
+        candidates,
+        key=lambda candidate: (
+            -candidate["priority"],
+            title_detail_score(candidate["title"]),
+            len(candidate["title"]),
+        ),
+    )["title"]
 
 
 def create_default_config(path: str):
@@ -448,6 +513,19 @@ def build_sonarr_basename(source_title: str, original_path: str, force_file_epis
     return safe_filename(f"{title}{extension}")
 
 
+def normalize_sonarr_pack_source_title(source_title: str) -> str:
+    source_episode = EPISODE_RE.search(source_title)
+    if not source_episode:
+        return source_title
+
+    token = source_episode.group("token")
+    season_match = re.search(r"S\d{1,2}", token, re.IGNORECASE)
+    if not season_match:
+        return source_title
+
+    return EPISODE_RE.sub(season_match.group(0).upper(), source_title, count=1)
+
+
 def media_files_for_rename(files: List[Dict]) -> List[Dict]:
     media_files = [file for file in files if is_media_path(file.get("name", ""))]
     if len(media_files) <= 1:
@@ -501,6 +579,8 @@ def build_rename_plan(media_type: str, source_title: str, files: List[Dict]) -> 
     plan = []
     media_files = radarr_media_files_for_rename(files) if media_type == "radarr" else media_files_for_rename(files)
     force_file_episode = media_type == "sonarr" and len(media_files) > 1
+    if force_file_episode:
+        source_title = normalize_sonarr_pack_source_title(source_title)
 
     for file in media_files:
         old_path = file.get("name", "")
@@ -551,6 +631,7 @@ def deduplicate_plan(plan: Iterable[Tuple[str, str]]) -> List[Tuple[str, str]]:
 def process_app(arr: ArrClient, qbit: QbitClient, dry_run: bool = False):
     LOGGER.info("Processing %s queue", arr.config.name)
     torrents = qbit.torrents()
+    processed_torrent_hashes = set()
     checked = 0
     fixed = 0
     for item in arr.queue():
@@ -570,6 +651,11 @@ def process_app(arr: ArrClient, qbit: QbitClient, dry_run: bool = False):
             continue
 
         torrent_hash = torrent["hash"]
+        if torrent_hash in processed_torrent_hashes:
+            LOGGER.debug("Skipping already processed torrent for %s", source_title)
+            continue
+        processed_torrent_hashes.add(torrent_hash)
+
         files = qbit.files(torrent_hash)
         plan = build_rename_plan(arr.config.media_type, source_title, files)
         if not plan:
