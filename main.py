@@ -246,14 +246,34 @@ def setup_logging():
     LOGGER.addHandler(console_handler)
 
     if log_file:
-        log_dir = os.path.dirname(log_file)
-        if log_dir:
-            os.makedirs(log_dir, exist_ok=True)
+        try:
+            log_dir = os.path.dirname(log_file)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
 
-        file_handler = logging.FileHandler(log_file, encoding="utf-8")
-        file_handler.setLevel(level)
-        file_handler.setFormatter(formatter)
-        LOGGER.addHandler(file_handler)
+            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler.setLevel(level)
+            file_handler.setFormatter(formatter)
+            LOGGER.addHandler(file_handler)
+        except OSError as error:
+            LOGGER.warning("Could not open log file %s: %s", log_file, error)
+
+
+def is_placeholder_config(config: Dict) -> bool:
+    placeholders = (
+        "your_radarr_host",
+        "your_radarr_port",
+        "your_radarr_api_key",
+        "your_sonarr_host",
+        "your_sonarr_port",
+        "your_sonarr_api_key",
+        "your_qbittorrent_host",
+        "your_qbittorrent_port",
+        "your_qbittorrent_username",
+        "your_qbittorrent_password",
+    )
+    serialized = json.dumps(config)
+    return any(placeholder in serialized for placeholder in placeholders)
 
 
 def make_arr_configs(config: Dict) -> List[AppConfig]:
@@ -512,6 +532,9 @@ def process_app(arr: ArrClient, qbit: QbitClient, dry_run: bool = False):
 
 def run_once(config_path: str, dry_run: bool = False):
     config = load_config(config_path)
+    if is_placeholder_config(config):
+        raise ConfigCreatedError(f"Config at {config_path} still contains placeholder values. Edit it, then restart qBit-Rectificarr.")
+
     if "qbittorrent" not in config:
         raise RuntimeError("Missing qbittorrent config section")
 
@@ -531,18 +554,25 @@ def run_once(config_path: str, dry_run: bool = False):
 
 def main():
     setup_logging()
-    mode = os.getenv("MODE", "run").lower()
+    mode = os.getenv("MODE", "loop").lower()
     config_path = os.getenv("CONFIG_PATH", "config.json")
     interval = int(os.getenv("RUN_INTERVAL", "300"))
 
     if mode not in ("run", "dry-run", "loop"):
         raise RuntimeError("MODE must be one of: run, dry-run, loop")
 
-    LOGGER.info("Booting qBit-Rectificarr mode=%s interval=%ss", mode, interval)
-    if mode == "loop":
+    LOGGER.info(
+        "Booting qBit-Rectificarr mode=%s interval=%ss config=%s log_file=%s",
+        mode,
+        interval,
+        config_path,
+        os.getenv("LOG_FILE", "/config/logs/qbit-rectificarr.log"),
+    )
+
+    if mode in ("loop", "dry-run"):
         while True:
             try:
-                run_once(config_path, dry_run=False)
+                run_once(config_path, dry_run=(mode == "dry-run"))
             except ConfigCreatedError as error:
                 LOGGER.error("%s", error)
                 LOGGER.error("Container is waiting. Edit the generated config file, then restart qBit-Rectificarr.")

@@ -71,7 +71,7 @@ On first start, qBit-Rectificarr creates `config.json` automatically if it does 
 
 ## Usage
 
-Preview planned renames:
+Preview planned renames once:
 
 ```console
 MODE=dry-run python main.py
@@ -107,10 +107,12 @@ Preview planned renames with the same Compose service:
 docker compose -f docker-compose.example.yml run --rm -e MODE=dry-run qbit-rectificarr
 ```
 
+On Unraid, set `MODE=dry-run` on the container itself. It will stay running and write logs every `RUN_INTERVAL` seconds without renaming files.
+
 Useful environment variables:
 
-- `MODE`: `run`, `dry-run`, or `loop`
-- `RUN_INTERVAL`: seconds between cycles when `MODE=loop`
+- `MODE`: `run`, `dry-run`, or `loop`. In Docker, default is `loop`; `dry-run` stays running and repeats.
+- `RUN_INTERVAL`: seconds between cycles when `MODE=loop` or `MODE=dry-run`
 - `CONFIG_PATH`: path to `config.json` inside the container
 - `LOG_LEVEL`: `DEBUG`, `INFO`, `WARNING`, or `ERROR`
 - `LOG_FILE`: log file path inside the container, defaults to `/config/logs/qbit-rectificarr.log`

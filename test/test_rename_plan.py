@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import mock_open, patch
 
-from main import LOGGER, ConfigCreatedError, build_rename_plan, load_config, setup_logging
+from main import LOGGER, ConfigCreatedError, build_rename_plan, is_placeholder_config, load_config, setup_logging
 
 
 class RenamePlanTests(unittest.TestCase):
@@ -114,6 +114,10 @@ class RenamePlanTests(unittest.TestCase):
             makedirs.assert_called_once_with("/config/logs", exist_ok=True)
         finally:
             LOGGER.handlers.clear()
+
+    def test_placeholder_config_is_detected(self):
+        self.assertTrue(is_placeholder_config({"qbittorrent": {"host": "your_qbittorrent_host"}}))
+        self.assertFalse(is_placeholder_config({"qbittorrent": {"host": "192.168.1.10"}}))
 
 
 if __name__ == "__main__":

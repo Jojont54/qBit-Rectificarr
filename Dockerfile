@@ -4,7 +4,7 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1
 ENV CONFIG_PATH=/config/config.json
-ENV MODE=run
+ENV MODE=loop
 ENV RUN_INTERVAL=300
 ENV LOG_LEVEL=INFO
 ENV LOG_FILE=/config/logs/qbit-rectificarr.log
