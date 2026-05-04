@@ -340,29 +340,33 @@ def get_status_messages(item: Dict) -> List[str]:
 
 
 def should_fix_item(item: Dict) -> bool:
-    if item.get("trackedDownloadState") != "importPending":
-        return False
-
-    if item.get("trackedDownloadStatus") not in ("warning", "error"):
-        return False
-
     joined = " ".join(get_status_messages(item)).lower()
-    return any(message in joined for message in IMPORT_FIX_MESSAGES)
+    has_fix_message = any(message in joined for message in IMPORT_FIX_MESSAGES)
+    if not has_fix_message:
+        return False
+
+    if "wasn't grabbed by" in joined or "was not grabbed by" in joined:
+        return False
+
+    return True
 
 
 def log_ignored_queue_item(item: Dict):
     state = item.get("trackedDownloadState")
     status = item.get("trackedDownloadStatus")
-    if state != "importPending" and status not in ("warning", "error"):
+    messages = " | ".join(get_status_messages(item))
+    has_fix_message = any(message in messages.lower() for message in IMPORT_FIX_MESSAGES)
+    if not has_fix_message and state != "importPending" and status not in ("warning", "error"):
         return
 
-    LOGGER.debug(
+    log = LOGGER.info if has_fix_message else LOGGER.debug
+    log(
         "Ignoring queue item id=%s title=%s state=%s status=%s messages=%s",
         item.get("id"),
         item.get("title") or item.get("sourceTitle"),
         state,
         status,
-        " | ".join(get_status_messages(item)),
+        messages,
     )
 
 

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import mock_open, patch
 
-from main import LOGGER, ConfigCreatedError, build_rename_plan, is_placeholder_config, load_config, setup_logging
+from main import LOGGER, ConfigCreatedError, build_rename_plan, is_placeholder_config, load_config, setup_logging, should_fix_item
 
 
 class RenamePlanTests(unittest.TestCase):
@@ -139,6 +139,18 @@ class RenamePlanTests(unittest.TestCase):
     def test_placeholder_config_is_detected(self):
         self.assertTrue(is_placeholder_config({"qbittorrent": {"host": "your_qbittorrent_host"}}))
         self.assertFalse(is_placeholder_config({"qbittorrent": {"host": "192.168.1.10"}}))
+
+    def test_not_custom_format_upgrade_is_fixed_even_when_not_import_pending(self):
+        item = {
+            "trackedDownloadState": "importBlocked",
+            "trackedDownloadStatus": "warning",
+            "statusMessages": [{
+                "title": "Release Rejected",
+                "messages": ["Not a Custom Format upgrade for existing episode file(s)."],
+            }],
+        }
+
+        self.assertTrue(should_fix_item(item))
 
 
 if __name__ == "__main__":
