@@ -113,6 +113,7 @@ Useful environment variables:
 - `RUN_INTERVAL`: seconds between cycles when `MODE=loop`
 - `CONFIG_PATH`: path to `config.json` inside the container
 - `LOG_LEVEL`: `DEBUG`, `INFO`, `WARNING`, or `ERROR`
+- `LOG_FILE`: log file path inside the container, defaults to `/config/logs/qbit-rectificarr.log`
 - `TZ`: container timezone
 
 For Unraid, use a path mapping like this:
@@ -130,6 +131,12 @@ On first boot, the container creates:
 ```
 
 Fill it, then restart the container.
+
+Logs are written to both the container output and:
+
+```text
+/mnt/user/appdata/qBit-Rectificarr/logs/qbit-rectificarr.log
+```
 
 ## Requirements
 

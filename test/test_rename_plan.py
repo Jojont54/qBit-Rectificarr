@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import mock_open, patch
 
-from main import ConfigCreatedError, build_rename_plan, load_config
+from main import LOGGER, ConfigCreatedError, build_rename_plan, load_config, setup_logging
 
 
 class RenamePlanTests(unittest.TestCase):
@@ -103,6 +103,17 @@ class RenamePlanTests(unittest.TestCase):
                 load_config("/config/config.json")
 
         makedirs.assert_called_once_with("/config", exist_ok=True)
+
+    def test_logging_creates_log_directory(self):
+        try:
+            with patch.dict("main.os.environ", {"LOG_FILE": "/config/logs/qbit-rectificarr.log"}), \
+                    patch("main.os.makedirs") as makedirs, \
+                    patch("logging.FileHandler"):
+                setup_logging()
+
+            makedirs.assert_called_once_with("/config/logs", exist_ok=True)
+        finally:
+            LOGGER.handlers.clear()
 
 
 if __name__ == "__main__":

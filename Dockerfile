@@ -7,6 +7,7 @@ ENV CONFIG_PATH=/config/config.json
 ENV MODE=run
 ENV RUN_INTERVAL=300
 ENV LOG_LEVEL=INFO
+ENV LOG_FILE=/config/logs/qbit-rectificarr.log
 
 RUN pip install --no-cache-dir requests
 

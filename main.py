@@ -233,11 +233,27 @@ def require_requests():
 def setup_logging():
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    log_file = os.getenv("LOG_FILE", "/config/logs/qbit-rectificarr.log")
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
+
+    LOGGER.setLevel(level)
+    LOGGER.handlers.clear()
+    LOGGER.propagate = False
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(level)
+    console_handler.setFormatter(formatter)
+    LOGGER.addHandler(console_handler)
+
+    if log_file:
+        log_dir = os.path.dirname(log_file)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(level)
+        file_handler.setFormatter(formatter)
+        LOGGER.addHandler(file_handler)
 
 
 def make_arr_configs(config: Dict) -> List[AppConfig]:

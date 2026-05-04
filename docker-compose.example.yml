@@ -9,5 +9,6 @@ services:
       MODE: loop
       RUN_INTERVAL: 300
       LOG_LEVEL: INFO
+      LOG_FILE: /config/logs/qbit-rectificarr.log
     volumes:
       - ./config:/config
