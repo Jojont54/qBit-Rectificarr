@@ -315,6 +315,16 @@ class RenamePlanTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "response='Fails.'"):
                 client.login()
 
+    def test_qbit_login_accepts_204_empty_response(self):
+        response = SimpleNamespace(status_code=204, text="")
+
+        self.assertTrue(QbitClient.is_login_success(response))
+
+    def test_qbit_login_accepts_legacy_ok_response(self):
+        response = SimpleNamespace(status_code=200, text="Ok.")
+
+        self.assertTrue(QbitClient.is_login_success(response))
+
 
 if __name__ == "__main__":
     unittest.main()

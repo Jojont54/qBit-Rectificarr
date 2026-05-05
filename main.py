@@ -195,11 +195,17 @@ class QbitClient:
             timeout=30,
         )
         response.raise_for_status()
-        if response.text != "Ok.":
+        if not self.is_login_success(response):
             raise RuntimeError(
                 "qBittorrent authentication failed: "
                 f"status={response.status_code} response={response.text!r} url={self.base_url}"
             )
+
+    @staticmethod
+    def is_login_success(response) -> bool:
+        if response.status_code == 204 and response.text == "":
+            return True
+        return response.status_code == 200 and response.text == "Ok."
 
     def torrents(self) -> List[Dict]:
         response = self.session.get(f"{self.base_url}/api/v2/torrents/info", timeout=30)
