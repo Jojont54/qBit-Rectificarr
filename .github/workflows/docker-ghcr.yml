@@ -5,12 +5,14 @@ on:
     branches:
       - main
       - master
+      - test
     tags:
       - "v*"
   pull_request:
     branches:
       - main
       - master
+      - test
   workflow_dispatch:
 
 permissions:
@@ -49,9 +51,10 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
+            type=ref,event=branch,enable=${{ github.ref_name != 'test' }}
             type=ref,event=tag
             type=sha,prefix=sha-
+            type=raw,value=test,enable=${{ github.ref_name == 'test' }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
