@@ -287,6 +287,34 @@ class RenamePlanTests(unittest.TestCase):
         self.assertEqual(client.session.headers["Referer"], "http://192.168.1.68:8080")
         self.assertEqual(client.session.headers["Origin"], "http://192.168.1.68:8080")
 
+    def test_qbit_login_error_includes_response_details(self):
+        class FakeResponse:
+            status_code = 200
+            text = "Fails."
+
+            def raise_for_status(self):
+                return None
+
+        class FakeSession:
+            def __init__(self):
+                self.headers = {}
+
+            def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        fake_requests = SimpleNamespace(Session=FakeSession)
+        with patch("main.requests", fake_requests):
+            client = QbitClient({
+                "host": "192.168.1.68",
+                "port": "8080",
+                "username": "user",
+                "password": "bad",
+                "ssl": False,
+            })
+
+            with self.assertRaisesRegex(RuntimeError, "response='Fails.'"):
+                client.login()
+
 
 if __name__ == "__main__":
     unittest.main()
