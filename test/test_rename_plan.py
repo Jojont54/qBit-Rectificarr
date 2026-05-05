@@ -1,7 +1,8 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
-from main import LOGGER, AppConfig, ArrClient, ConfigCreatedError, build_rename_plan, is_placeholder_config, load_config, normalize_sonarr_pack_source_title, setup_logging, should_fix_item
+from main import LOGGER, AppConfig, ArrClient, ConfigCreatedError, QbitClient, build_base_url, build_rename_plan, is_placeholder_config, load_config, normalize_sonarr_pack_source_title, setup_logging, should_fix_item
 
 
 class RenamePlanTests(unittest.TestCase):
@@ -268,6 +269,61 @@ class RenamePlanTests(unittest.TestCase):
         }
 
         self.assertTrue(should_fix_item(item))
+
+    def test_base_url_accepts_host_with_scheme(self):
+        self.assertEqual(build_base_url("http://192.168.1.68", "8080", False), "http://192.168.1.68:8080")
+
+    def test_qbit_client_sets_csrf_headers(self):
+        fake_requests = SimpleNamespace(Session=lambda: SimpleNamespace(headers={}))
+        with patch("main.requests", fake_requests):
+            client = QbitClient({
+                "host": "192.168.1.68",
+                "port": "8080",
+                "username": "user",
+                "password": "pass",
+                "ssl": False,
+            })
+
+        self.assertEqual(client.session.headers["Referer"], "http://192.168.1.68:8080")
+        self.assertEqual(client.session.headers["Origin"], "http://192.168.1.68:8080")
+
+    def test_qbit_login_error_includes_response_details(self):
+        class FakeResponse:
+            status_code = 200
+            text = "Fails."
+
+            def raise_for_status(self):
+                return None
+
+        class FakeSession:
+            def __init__(self):
+                self.headers = {}
+
+            def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        fake_requests = SimpleNamespace(Session=FakeSession)
+        with patch("main.requests", fake_requests):
+            client = QbitClient({
+                "host": "192.168.1.68",
+                "port": "8080",
+                "username": "user",
+                "password": "bad",
+                "ssl": False,
+            })
+
+            with self.assertRaisesRegex(RuntimeError, "response='Fails.'"):
+                client.login()
+
+    def test_qbit_login_accepts_204_empty_response(self):
+        response = SimpleNamespace(status_code=204, text="")
+
+        self.assertTrue(QbitClient.is_login_success(response))
+
+    def test_qbit_login_accepts_legacy_ok_response(self):
+        response = SimpleNamespace(status_code=200, text="Ok.")
+
+        self.assertTrue(QbitClient.is_login_success(response))
 
 
 if __name__ == "__main__":

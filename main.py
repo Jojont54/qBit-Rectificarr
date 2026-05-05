@@ -8,6 +8,7 @@ import os
 import posixpath
 import re
 import time
+import urllib.parse
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -91,8 +92,7 @@ class ArrClient:
     def __init__(self, config: AppConfig):
         require_requests()
         self.config = config
-        scheme = "https" if config.ssl else "http"
-        self.base_url = f"{scheme}://{config.host}:{config.port}"
+        self.base_url = build_base_url(config.host, config.port, config.ssl)
 
     def api(self, method: str, endpoint: str, params: Optional[Dict] = None):
         params = dict(params or {})
@@ -179,11 +179,14 @@ class ArrClient:
 class QbitClient:
     def __init__(self, config: Dict):
         require_requests()
-        scheme = "https" if config.get("ssl", False) else "http"
-        self.base_url = f"{scheme}://{config['host']}:{config['port']}"
+        self.base_url = build_base_url(config["host"], str(config.get("port", "")), config.get("ssl", False))
         self.username = config.get("username", "")
         self.password = config.get("password", "")
         self.session = requests.Session()
+        self.session.headers.update({
+            "Referer": self.base_url,
+            "Origin": self.base_url,
+        })
 
     def login(self):
         response = self.session.post(
@@ -192,8 +195,17 @@ class QbitClient:
             timeout=30,
         )
         response.raise_for_status()
-        if response.text != "Ok.":
-            raise RuntimeError("qBittorrent authentication failed")
+        if not self.is_login_success(response):
+            raise RuntimeError(
+                "qBittorrent authentication failed: "
+                f"status={response.status_code} response={response.text!r} url={self.base_url}"
+            )
+
+    @staticmethod
+    def is_login_success(response) -> bool:
+        if response.status_code == 204 and response.text == "":
+            return True
+        return response.status_code == 200 and response.text == "Ok."
 
     def torrents(self) -> List[Dict]:
         response = self.session.get(f"{self.base_url}/api/v2/torrents/info", timeout=30)
@@ -227,6 +239,22 @@ def download_ids_match(left: Optional[str], right: Optional[str]) -> bool:
     left = str(left).lower()
     right = str(right).lower()
     return left == right or left in right or right in left
+
+
+def build_base_url(host: str, port: str = "", ssl: bool = False) -> str:
+    host = str(host).strip().rstrip("/")
+    port = str(port).strip()
+
+    if host.startswith(("http://", "https://")):
+        parsed = urllib.parse.urlparse(host)
+        scheme = parsed.scheme
+        netloc = parsed.netloc
+        if port and ":" not in netloc:
+            netloc = f"{netloc}:{port}"
+        return f"{scheme}://{netloc}"
+
+    scheme = "https" if ssl else "http"
+    return f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}"
 
 
 def add_source_title_candidate(candidates: List[Dict], item: Dict, priority: int):
