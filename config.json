@@ -5,7 +5,7 @@
         "port" : "your_radarr_port",
         "api_key" : "your_radarr_api_key",
         "ssl" : false,
-        "qbittorrent_tag" : ""
+        "qbittorrent_category" : "radarr"
     },
     "sonarr" : {
         "enabled" : false,
@@ -13,7 +13,7 @@
         "port" : "your_sonarr_port",
         "api_key" : "your_sonarr_api_key",
         "ssl" : false,
-        "qbittorrent_tag" : ""
+        "qbittorrent_category" : "tv-sonarr"
     },
     "qbittorrent" : {
         "host" : "your_qbittorrent_host",

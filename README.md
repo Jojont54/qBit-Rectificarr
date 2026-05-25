@@ -51,7 +51,7 @@ On first start, qBit-Rectificarr creates `config.json` automatically if it does 
         "port": "your_radarr_port",
         "api_key": "your_radarr_api_key",
         "ssl": false,
-        "qbittorrent_tag": "rectificarr-radarr"
+        "qbittorrent_category": "radarr"
     },
     "sonarr": {
         "enabled": true,
@@ -59,7 +59,7 @@ On first start, qBit-Rectificarr creates `config.json` automatically if it does 
         "port": "your_sonarr_port",
         "api_key": "your_sonarr_api_key",
         "ssl": false,
-        "qbittorrent_tag": "rectificarr-sonarr"
+        "qbittorrent_category": "tv-sonarr"
     },
     "qbittorrent": {
         "host": "your_qbittorrent_host",
@@ -71,7 +71,7 @@ On first start, qBit-Rectificarr creates `config.json` automatically if it does 
 }
 ```
 
-`qbittorrent_tag` is optional. When set, qBit-Rectificarr only processes torrents that carry the matching qBittorrent tag for that app. For example, apply `rectificarr-radarr` to Radarr downloads and `rectificarr-sonarr` to Sonarr downloads. Leave it as `""` to process without tag filtering.
+`qbittorrent_category` prevents one *arr instance from touching a download owned by another instance. It defaults to the usual download-client categories: `radarr` for Radarr and `tv-sonarr` for Sonarr. For a second instance, set its own category, such as `radarr-4k`. Set it to `""` only if you intentionally do not want category filtering.
 
 ## Usage
 
