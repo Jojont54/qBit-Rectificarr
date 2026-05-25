@@ -50,14 +50,16 @@ On first start, qBit-Rectificarr creates `config.json` automatically if it does 
         "host": "your_radarr_host",
         "port": "your_radarr_port",
         "api_key": "your_radarr_api_key",
-        "ssl": false
+        "ssl": false,
+        "qbittorrent_category": "radarr"
     },
     "sonarr": {
         "enabled": true,
         "host": "your_sonarr_host",
         "port": "your_sonarr_port",
         "api_key": "your_sonarr_api_key",
-        "ssl": false
+        "ssl": false,
+        "qbittorrent_category": "tv-sonarr"
     },
     "qbittorrent": {
         "host": "your_qbittorrent_host",
@@ -68,6 +70,8 @@ On first start, qBit-Rectificarr creates `config.json` automatically if it does 
     }
 }
 ```
+
+`qbittorrent_category` prevents one *arr instance from touching a download owned by another instance. It defaults to the usual download-client categories: `radarr` for Radarr and `tv-sonarr` for Sonarr. For a second instance, set its own category, such as `radarr-4k`. Set it to `""` only if you intentionally do not want category filtering.
 
 ## Usage
 

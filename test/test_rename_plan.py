@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
-from main import LOGGER, AppConfig, ArrClient, ConfigCreatedError, QbitClient, build_base_url, build_rename_plan, is_placeholder_config, load_config, normalize_sonarr_pack_source_title, setup_logging, should_fix_item
+from main import LOGGER, AppConfig, ArrClient, ConfigCreatedError, QbitClient, build_base_url, build_rename_plan, find_torrent, is_placeholder_config, load_config, make_arr_configs, normalize_sonarr_pack_source_title, setup_logging, should_fix_item, torrent_matches_category
 
 
 class RenamePlanTests(unittest.TestCase):
@@ -324,6 +324,47 @@ class RenamePlanTests(unittest.TestCase):
         response = SimpleNamespace(status_code=200, text="Ok.")
 
         self.assertTrue(QbitClient.is_login_success(response))
+
+    def test_qbit_category_filter_matches_expected_instance(self):
+        torrent = {"category": "tv-sonarr"}
+
+        self.assertTrue(torrent_matches_category(torrent, "tv-sonarr"))
+        self.assertFalse(torrent_matches_category(torrent, "radarr"))
+
+    def test_find_torrent_does_not_mix_app_categories(self):
+        item = {"downloadId": "abc"}
+        torrents = [{"hash": "abc", "category": "tv-sonarr"}]
+
+        self.assertIsNone(find_torrent(item, torrents, "radarr"))
+        self.assertEqual(find_torrent(item, torrents, "tv-sonarr"), torrents[0])
+
+    def test_arr_config_reads_app_specific_qbit_category(self):
+        apps = make_arr_configs({
+            "radarr": {
+                "host": "radarr",
+                "port": "7878",
+                "api_key": "x",
+                "qbittorrent_category": "radarr-4k",
+            },
+            "sonarr": {
+                "host": "sonarr",
+                "port": "8989",
+                "api_key": "y",
+                "qbittorrent_category": "tv-sonarr-anime",
+            },
+        })
+
+        self.assertEqual(apps[0].qbittorrent_category, "radarr-4k")
+        self.assertEqual(apps[1].qbittorrent_category, "tv-sonarr-anime")
+
+    def test_arr_config_uses_default_qbit_categories(self):
+        apps = make_arr_configs({
+            "radarr": {"host": "radarr", "port": "7878", "api_key": "x"},
+            "sonarr": {"host": "sonarr", "port": "8989", "api_key": "y"},
+        })
+
+        self.assertEqual(apps[0].qbittorrent_category, "radarr")
+        self.assertEqual(apps[1].qbittorrent_category, "tv-sonarr")
 
 
 if __name__ == "__main__":

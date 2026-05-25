@@ -4,14 +4,16 @@
         "host" : "your_radarr_host",
         "port" : "your_radarr_port",
         "api_key" : "your_radarr_api_key",
-        "ssl" : false
+        "ssl" : false,
+        "qbittorrent_category" : "radarr"
     },
     "sonarr" : {
         "enabled" : false,
         "host" : "your_sonarr_host",
         "port" : "your_sonarr_port",
         "api_key" : "your_sonarr_api_key",
-        "ssl" : false
+        "ssl" : false,
+        "qbittorrent_category" : "tv-sonarr"
     },
     "qbittorrent" : {
         "host" : "your_qbittorrent_host",

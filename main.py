@@ -55,6 +55,7 @@ DEFAULT_CONFIG = {
         "port": "your_radarr_port",
         "api_key": "your_radarr_api_key",
         "ssl": False,
+        "qbittorrent_category": "radarr",
     },
     "sonarr": {
         "enabled": False,
@@ -62,6 +63,7 @@ DEFAULT_CONFIG = {
         "port": "your_sonarr_port",
         "api_key": "your_sonarr_api_key",
         "ssl": False,
+        "qbittorrent_category": "tv-sonarr",
     },
     "qbittorrent": {
         "host": "your_qbittorrent_host",
@@ -86,6 +88,7 @@ class AppConfig:
     api_key: str
     ssl: bool = False
     enabled: bool = True
+    qbittorrent_category: str = ""
 
 
 class ArrClient:
@@ -393,6 +396,10 @@ def make_arr_configs(config: Dict) -> List[AppConfig]:
             api_key=app["api_key"],
             ssl=app.get("ssl", False),
             enabled=app.get("enabled", True),
+            qbittorrent_category=app.get(
+                "qbittorrent_category",
+                "radarr" if media_type == "radarr" else "tv-sonarr",
+            ).strip(),
         ))
     return apps
 
@@ -469,11 +476,21 @@ def log_ignored_queue_item(item: Dict):
     )
 
 
-def find_torrent(item: Dict, torrents: List[Dict]) -> Optional[Dict]:
+def torrent_matches_category(torrent: Dict, required_category: str = "") -> bool:
+    if required_category and (torrent.get("category") or "").strip().lower() != required_category.strip().lower():
+        return False
+    return True
+
+
+def find_torrent(
+    item: Dict,
+    torrents: List[Dict],
+    required_category: str = "",
+) -> Optional[Dict]:
     download_id = (item.get("downloadId") or "").lower()
     if download_id:
         for torrent in torrents:
-            if torrent.get("hash", "").lower() == download_id:
+            if torrent.get("hash", "").lower() == download_id and torrent_matches_category(torrent, required_category):
                 return torrent
 
     title_candidates = {
@@ -481,7 +498,7 @@ def find_torrent(item: Dict, torrents: List[Dict]) -> Optional[Dict]:
         (item.get("sourceTitle") or "").lower(),
     }
     for torrent in torrents:
-        if torrent.get("name", "").lower() in title_candidates:
+        if torrent.get("name", "").lower() in title_candidates and torrent_matches_category(torrent, required_category):
             return torrent
 
     return None
@@ -657,7 +674,9 @@ def deduplicate_plan(plan: Iterable[Tuple[str, str]]) -> List[Tuple[str, str]]:
 
 
 def process_app(arr: ArrClient, qbit: QbitClient, dry_run: bool = False):
-    LOGGER.info("Processing %s queue", arr.config.name)
+    category = arr.config.qbittorrent_category
+    filter_suffix = f" qbit_category={category}" if category else ""
+    LOGGER.info("Processing %s queue%s", arr.config.name, filter_suffix)
     torrents = qbit.torrents()
     processed_torrent_hashes = set()
     checked = 0
@@ -673,9 +692,14 @@ def process_app(arr: ArrClient, qbit: QbitClient, dry_run: bool = False):
             LOGGER.warning("Skipping queue item %s: no source title found", item.get("id"))
             continue
 
-        torrent = find_torrent(item, torrents)
+        torrent = find_torrent(
+            item,
+            torrents,
+            arr.config.qbittorrent_category,
+        )
         if not torrent:
-            LOGGER.warning("Skipping %s: no matching qBittorrent torrent found", source_title)
+            expected = f" with category={category}" if category else ""
+            LOGGER.warning("Skipping %s: no matching qBittorrent torrent found%s", source_title, expected)
             continue
 
         torrent_hash = torrent["hash"]
