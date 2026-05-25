@@ -50,14 +50,16 @@ On first start, qBit-Rectificarr creates `config.json` automatically if it does 
         "host": "your_radarr_host",
         "port": "your_radarr_port",
         "api_key": "your_radarr_api_key",
-        "ssl": false
+        "ssl": false,
+        "qbittorrent_tag": "rectificarr-radarr"
     },
     "sonarr": {
         "enabled": true,
         "host": "your_sonarr_host",
         "port": "your_sonarr_port",
         "api_key": "your_sonarr_api_key",
-        "ssl": false
+        "ssl": false,
+        "qbittorrent_tag": "rectificarr-sonarr"
     },
     "qbittorrent": {
         "host": "your_qbittorrent_host",
@@ -68,6 +70,8 @@ On first start, qBit-Rectificarr creates `config.json` automatically if it does 
     }
 }
 ```
+
+`qbittorrent_tag` is optional. When set, qBit-Rectificarr only processes torrents that carry the matching qBittorrent tag for that app. For example, apply `rectificarr-radarr` to Radarr downloads and `rectificarr-sonarr` to Sonarr downloads. Leave it as `""` to process without tag filtering.
 
 ## Usage
 
