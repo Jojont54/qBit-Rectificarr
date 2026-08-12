@@ -438,16 +438,34 @@ def looks_like_release_name(value: str) -> bool:
 
 def get_status_messages(item: Dict) -> List[str]:
     messages = []
+
+    def add_message(value):
+        if value is None:
+            return
+        if isinstance(value, str):
+            if value:
+                messages.append(value)
+            return
+        if isinstance(value, dict):
+            for key in ("message", "messages", "title", "name", "reason"):
+                add_message(value.get(key))
+            return
+        if isinstance(value, list):
+            for entry in value:
+                add_message(entry)
+            return
+        messages.append(str(value))
+
     for status in item.get("statusMessages", []) or []:
-        messages.extend(status.get("messages", []) or [])
-        if status.get("title"):
-            messages.append(status["title"])
+        add_message(status)
     return messages
 
 
 def should_fix_item(item: Dict) -> bool:
     joined = " ".join(get_status_messages(item)).lower()
     has_fix_message = any(message in joined for message in IMPORT_FIX_MESSAGES)
+    has_custom_format_reject = "custom format" in joined and ("upgrade" in joined or "improve" in joined)
+    has_fix_message = has_fix_message or has_custom_format_reject
     if not has_fix_message:
         return False
 
@@ -462,10 +480,11 @@ def log_ignored_queue_item(item: Dict):
     status = item.get("trackedDownloadStatus")
     messages = " | ".join(get_status_messages(item))
     has_fix_message = any(message in messages.lower() for message in IMPORT_FIX_MESSAGES)
-    if not has_fix_message and state != "importPending" and status not in ("warning", "error"):
+    has_status_detail = bool(messages)
+    if not has_fix_message and not has_status_detail and state != "importPending" and status not in ("warning", "error"):
         return
 
-    log = LOGGER.info if has_fix_message else LOGGER.debug
+    log = LOGGER.info if has_fix_message or has_status_detail else LOGGER.debug
     log(
         "Ignoring queue item id=%s title=%s state=%s status=%s messages=%s",
         item.get("id"),

@@ -270,6 +270,18 @@ class RenamePlanTests(unittest.TestCase):
 
         self.assertTrue(should_fix_item(item))
 
+    def test_nested_status_message_is_extracted_for_custom_format_reject(self):
+        item = {
+            "trackedDownloadState": "importBlocked",
+            "trackedDownloadStatus": "warning",
+            "statusMessages": [{
+                "title": "Release Rejected",
+                "messages": [{"message": "New Custom Format score does not improve existing file."}],
+            }],
+        }
+
+        self.assertTrue(should_fix_item(item))
+
     def test_base_url_accepts_host_with_scheme(self):
         self.assertEqual(build_base_url("http://192.168.1.68", "8080", False), "http://192.168.1.68:8080")
 
