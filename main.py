@@ -32,6 +32,9 @@ IMPORT_FIX_MESSAGES = (
     "unable to parse file",
     "unknown movie",
     "not a custom format upgrade",
+    "manual import required",
+    "matched to movie by id",
+    "invalid season or episode",
 )
 
 EPISODE_RE = re.compile(

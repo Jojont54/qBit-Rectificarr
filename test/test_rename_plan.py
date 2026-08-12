@@ -282,6 +282,28 @@ class RenamePlanTests(unittest.TestCase):
 
         self.assertTrue(should_fix_item(item))
 
+    def test_radarr_manual_import_required_is_fixed(self):
+        item = {
+            "trackedDownloadState": "importBlocked",
+            "trackedDownloadStatus": "warning",
+            "statusMessages": [{
+                "messages": ["Found matching movie via grab history, but release was matched to movie by ID. Manual Import required."],
+            }],
+        }
+
+        self.assertTrue(should_fix_item(item))
+
+    def test_sonarr_invalid_season_or_episode_is_fixed(self):
+        item = {
+            "trackedDownloadState": "importPending",
+            "trackedDownloadStatus": "warning",
+            "statusMessages": [{
+                "messages": ["Invalid season or episode"],
+            }],
+        }
+
+        self.assertTrue(should_fix_item(item))
+
     def test_base_url_accepts_host_with_scheme(self):
         self.assertEqual(build_base_url("http://192.168.1.68", "8080", False), "http://192.168.1.68:8080")
 
